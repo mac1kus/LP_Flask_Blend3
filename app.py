@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_file,jsonify
+from flask import Flask, render_template, request, send_file, jsonify, redirect
 from pulp import *
 import math
 from datetime import datetime
@@ -919,7 +919,7 @@ def login():
     username = request.form.get('username')
     password = request.form.get('password')
     if username == 'admin' and password == 'admin123':
-        return render_template('input.html',current_datetime=datetime.now())# your main app page
+        return redirect('/index')  # Redirect to index route which has all the data
     else:
         return "Invalid credentials. Please go back and try again."
 
@@ -943,7 +943,7 @@ def get_brent_chart_data():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/', methods=['GET'])
+@app.route('/index')
 def index():
     grades_initial = [{"name": "Regular", "min": 4000.000000, "max": 400000.000000, "price": 100.000000},
                       {"name": "Premium", "min": 0.000000, "max": 400000.000000, "price": 110.000000},
