@@ -909,6 +909,19 @@ end;
     return result1_content.getvalue(), range_report_content.getvalue(), infeasibility_report_stringio.getvalue()
 
 # Main route handlers
+@app.route('/')
+def login_page():
+    return render_template('login.html')
+
+# Handle login form submission
+@app.route('/login', methods=['POST'])
+def login():
+    username = request.form.get('username')
+    password = request.form.get('password')
+    if username == 'admin' and password == 'admin123':
+        return render_template('input.html',current_datetime=datetime.now())# your main app page
+    else:
+        return "Invalid credentials. Please go back and try again."
 
 @app.route('/get_brent_price')
 def get_brent_price():
