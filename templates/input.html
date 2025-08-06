@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gasoline Blending Optimization</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> 
+   
+</head>
+<body class="p-4">
+    <div id="messageBox"></div>
+
+    <div class="mahesh-kris-text">
+         @Mahesh Kris
+    </div>
+    
+    <div class="container max-w-7xl px-4 py-8">
+        
+        <div class="flex justify-end mb-4">
+            <button id="playMusicButton" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-full shadow-lg transition duration-300 ease-in-out transform hover:scale-105">
+                Play African Music 🎵
+            </button>
+            <audio id="africanMusic"></audio>
+        </div>
+
+        <div class="flex flex-col gap-y-2">
+            
+            <div class="logo-container">
+                <img src="{{ url_for('static', filename='images/dangote.jpg') }}" alt="Dangote Logo">
+            </div>
+
+            <div class="header-info">
+                <div class="header-images">
+                    <img src="{{ url_for('static', filename='images/aliko.jpg') }}" alt="Aliko Dangote Refinery" onerror="this.onerror=null;this.src='https://placehold.co/100x100/E0E7FF/374151?text=Aliko';" class="w-24 h-24 object-cover rounded-full">
+                    <img src="{{ url_for('static', filename='images/refinery.jpg') }}" alt="Oil Refinery" onerror="this.onerror=null;this.src='https://placehold.co/100x100/E0E7FF/374151?text=Refinery';" class="w-24 h-24 object-cover rounded-full cursor-pointer hover:opacity-80" onclick="showMessage('Largest refinery in the world', 'info')">
+                    <img src="{{ url_for('static', filename='images/birds.gif') }}" alt="A flying bird">
+                    
+                </div>
+                
+                <h1 class="text-4xl text-center">Gasoline Blending Optimization</h1>
+                <div class="datetime-stamp">
+                   <p>Date: <span id="currentDate">{{ current_datetime.strftime('%Y-%m-%d') }}</span></p>
+                   <p>Time: <span id="currentTime">{{ current_datetime.strftime('%I:%M:%S %p %Z%z') }}</span></p>
+                </div>
+            </div>
+            
+            <div class="flex justify-center">
+                <div class="widget">
+                  <h3>Brent</h3>
+                  <p id="price">Loading...</p>
+                </div>
+            </div>
+            <div class="brent-chart-widget">
+              <h3>Brent Live Chart</h3>
+              <canvas id="brent-chart"></canvas>
+            </div>
+           
+
+            <form action="{{ url_for('run_lp') }}" method="post" class="flex flex-col gap-y-8">
+                <input type="hidden" id="user_timezone_input" name="user_timezone">
+
+                <div class="form-group solver-choice">
+                    <label>
+                        <input type="radio" name="solver_choice" value="CBC" checked>
+                        <span>CBC Solver</span>
+                    </label>
+                    <label>
+                        <input type="radio" name="solver_choice" value="GLPK">
+                        <span>GLPK Solver</span>
+                    </label>
+                </div>
+
+                <div>
+                    <h2 class="text-2xl mb-4">Gasoline Grades</h2>
+                    <table id="grades-table">
+                        <thead>
+                            <tr>
+                                <th class="text-center">Grade</th>
+                                <th class="text-center">Min Production (bbl)</th>
+                                <th class="text-center">Max Production (bbl)</th>
+                                <th class="text-center">Selling Price ($/bbl)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="grades-tbody">
+                            {% for grade in grades %}
+                            <tr>
+                                <td class="font-medium">{{ grade.name }}</td>
+                                <td><input type="text" name="grade_{{ grade.name }}_min" value="{{ grade.min }}" class="numeric-input"></td>
+                                <td><input type="text" name="grade_{{ grade.name }}_max" value="{{ grade.max }}" class="numeric-input"></td>
+                                <td><input type="text" name="grade_{{ grade.name }}_price" value="{{ grade.price }}" class="numeric-input"></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div>
+                    <h2 class="text-2xl mb-4">Component Properties</h2>
+                    
+                    <div class="component-table-wrapper">
+                        <table id="components-table" style="table-layout: fixed;">
+                            <thead>
+                                <tr>
+                                    <th class="text-center" style="width: 150px;">TAG</th>
+                                    <th class="text-center" style="width: 150px;">Component Name</th>
+                                    <th class="text-center">Min Comp</th>
+                                    <th class="text-center">Availability</th>
+                                    <th class="text-center">Factor</th>
+                                    <th class="text-center">Cost</th>
+                                    {% for prop in properties %}
+                                    <th class="text-center">{{ prop }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody id="components-tbody">
+                                {% for comp in components %}
+                                <tr>
+                                    <td class="text-left">{{ comp.name}}</td>
+                                    <td class="text-left">{{ comp.tag}}</td>
+                                    <td><input type="text" name="component_{{ comp.name }}_min_comp" value="{{ comp.min_comp }}" class="resizable-component-input numeric-input"></td>
+                                    <td><input type="text" name="component_{{ comp.name }}_availability" value="{{ comp.availability }}" class="resizable-component-input numeric-input"></td>
+                                    <td><input type="text" name="component_{{ comp.name }}_factor" value="{{ comp.factor }}" class="resizable-component-input numeric-input"></td>
+                                    <td><input type="text" name="component_{{ comp.name }}_cost" value="{{ '%.2f' | format(comp.display_cost) }}" class="resizable-component-input numeric-input"></td>
+                                    {% for prop in properties %}
+                                    <td><input type="text" name="component_{{ comp.name }}_property_{{ prop }}" value="{{ comp.properties[prop] }}" class="resizable-component-input numeric-input"></td>
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div>
+                    <h2 class="text-2xl mb-4">Specifications</h2>
+                    <table id="specs-table">
+                        <thead id="specs-thead">
+                            <tr>
+                                <th class="text-center" rowspan="2">Property</th>
+                                {% for grade in grades %}
+                                <th class="text-center" colspan="2">{{ grade.name }}</th>
+                                {% endfor %}
+                            </tr>
+                            <tr>
+                                {% for grade in grades %}
+                                <th class="text-center">Min</th>
+                                <th class="text-center">Max</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody id="specs-tbody">
+                            {% for prop in properties %}
+                            <tr>
+                                <td class="font-medium">{{ prop }}</td>
+                                {% for grade in grades %}
+                                <td>
+                                    {% if prop in ['SUL', 'ARO', 'BEN', 'OXY', 'OLEFIN'] %}
+                                        <input type="text" name="spec_{{ prop }}_{{ grade.name }}_min" value="" class="spec-input-width numeric-input empty-field" readonly>
+                                    {% elif prop == 'RVP' %}
+                                        <input type="text" name="spec_{{ prop }}_{{ grade.name }}_min" value="0.00" class="spec-input-width numeric-input">
+                                    {% else %}
+                                        <input type="text" name="spec_{{ prop }}_{{ grade.name }}_min" value="{{ specs[prop][grade.name].min if specs[prop][grade.name].min != 0 else '' }}" class="spec-input-width numeric-input">
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if prop in ['RON', 'MON'] %}
+                                        <input type="text" name="spec_{{ prop }}_{{ grade.name }}_max" value="inf" class="spec-input-width readonly-field" readonly>
+                                    {% elif prop == 'E15' %}
+                                        <input type="text" name="spec_{{ prop }}_{{ grade.name }}_max" value="{{ 'inf' if specs[prop][grade.name].max > 1e12 else specs[prop][grade.name].max }}" class="spec-input-width numeric-input" readonly style="background-color: #e5e7eb; color: #6b7280;">
+                                    {% elif prop in ['ARO', 'BEN', 'OXY', 'OLEFIN'] %}
+                                         <input type="text" name="spec_{{ prop }}_{{ grade.name }}_max" value="{{ specs[prop][grade.name].max if specs[prop][grade.name].max != 0 else '' }}" class="spec-input-width numeric-input">
+                                    {% else %}
+                                        <input type="text" name="spec_{{ prop }}_{{ grade.name }}_max" value="{{ 'inf' if specs[prop][grade.name].max > 1e12 else specs[prop][grade.name].max }}" class="spec-input-width numeric-input">
+                                    {% endif %}
+                                </td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="text-center mt-8">
+                    <button type="submit" class="btn-primary">Run Optimization</button>
+                </div>
+            </form>
+
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
