@@ -10,6 +10,7 @@ import tempfile
 import traceback
 from jinja2 import Environment, FileSystemLoader, select_autoescape, StrictUndefined
 import pytz
+from dotenv import load_dotenv
 import yfinance as yf
 
 # --- Flask App Initialization ---
@@ -910,6 +911,15 @@ end;
     return result1_content.getvalue(), range_report_content.getvalue(), infeasibility_report_stringio.getvalue()
 
 # Main route handlers
+
+load_dotenv()  # Load .env into environment 
+
+APP_USERNAME = os.environ.get("APP_USERNAME")
+APP_PASSWORD = os.environ.get("APP_PASSWORD")
+
+print("Loaded APP_USERNAME from .env:", APP_USERNAME)
+print("Loaded APP_PASSWORD from .env:", APP_PASSWORD)
+
 @app.route('/')
 def login_page():
     message = request.args.get('message', '')
@@ -920,7 +930,7 @@ def login_page():
 def login():
     username = request.form.get('username')
     password = request.form.get('password')
-    if username == 'admin' and password == 'admin123':
+    if username == APP_USERNAME and password == APP_PASSWORD:
         return redirect('/index')  # Redirect to index route which has all the data
     else:
         return redirect(url_for('login_page', message='Invalid username or password'))
