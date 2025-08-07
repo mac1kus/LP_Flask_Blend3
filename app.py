@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, send_file, jsonify, redirect
+from flask import url_for
 from pulp import *
 import math
 from datetime import datetime
@@ -911,7 +912,8 @@ end;
 # Main route handlers
 @app.route('/')
 def login_page():
-    return render_template('login.html')
+    message = request.args.get('message', '')
+    return render_template('login.html', message=message)
 
 # Handle login form submission
 @app.route('/login', methods=['POST'])
@@ -921,7 +923,7 @@ def login():
     if username == 'admin' and password == 'admin123':
         return redirect('/index')  # Redirect to index route which has all the data
     else:
-        return "Invalid credentials. Please go back and try again."
+        return redirect(url_for('login_page', message='Invalid username or password'))
 
 @app.route('/get_brent_price')
 def get_brent_price():
