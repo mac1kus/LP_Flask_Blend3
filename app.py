@@ -154,8 +154,88 @@ def make_glpk_safe_name(name):
     """Convert names to GLPK-safe identifiers by replacing spaces with underscores"""
     return name.replace(' ', '_').replace('-', '_')
 
+def get_infeasible_blend(grade_name, grade_idx, grades_data, components_data, properties_list, specs_data, spec_bounds):
+    """Get the best possible blend even if infeasible by relaxing constraints"""
+    grade_min = grades_data[grade_idx]['min']
+    grade_max = grades_data[grade_idx]['max']
+    grade_price = grades_data[grade_idx]['price']
+    
+    components = [c['name'] for c in components_data]
+    component_cost = {c['name']: c['cost'] for c in components_data}
+    component_availability = {c['name']: c['availability'] for c in components_data}
+    component_min_comp = {c['name']: c['min_comp'] for c in components_data}
+    
+    property_value = {}
+    for comp_data in components_data:
+        for prop in properties_list:
+            property_value[(prop, comp_data['name'])] = comp_data['properties'].get(prop, 0.0)
+    
+    # Create a relaxed model with slack variables
+    model = LpProblem(f"{grade_name}_Relaxed", LpMaximize)
+    
+    # Decision variables
+    blend = {}
+    for comp in components:
+        blend[comp] = LpVariable(f"Blend_{grade_name}_{comp}", lowBound=0, cat='Continuous')
+    
+    # Slack variables for constraints (to allow violations)
+    slack_vars = {}
+    penalty = 1000  # High penalty for constraint violations
+    
+    # Modified objective: maximize profit minus penalties for violations
+    total_blend = lpSum([blend[comp] for comp in components])
+    profit = grade_price * total_blend - lpSum([component_cost[comp] * blend[comp] for comp in components])
+    
+    # Add slack variables for property constraints
+    slack_sum = 0
+    for prop in properties_list:
+        min_val, max_val = spec_bounds.get((prop, grade_name), (0.0, float('inf')))
+        
+        if min_val is not None and not math.isinf(min_val) and min_val > 0:
+            slack_vars[(prop, 'min')] = LpVariable(f"Slack_{grade_name}_{prop}_min", lowBound=0)
+            slack_sum += slack_vars[(prop, 'min')] * penalty
+            
+        if max_val is not None and not math.isinf(max_val):
+            slack_vars[(prop, 'max')] = LpVariable(f"Slack_{grade_name}_{prop}_max", lowBound=0)
+            slack_sum += slack_vars[(prop, 'max')] * penalty
+    
+    # Objective with penalty
+    model += profit - slack_sum, "Profit_minus_penalties"
+    
+    # Volume constraints (keep these hard)
+    model += total_blend >= grade_min, f"{grade_name}_Min"
+    model += total_blend <= grade_max, f"{grade_name}_Max"
+    
+    # Component availability (keep these hard)
+    for comp in components:
+        model += blend[comp] <= component_availability[comp], f"{comp}_Availability"
+    
+    # Component minimums
+    for comp in components:
+        min_comp_val = component_min_comp.get(comp, 0)
+        if min_comp_val is not None and min_comp_val > 0:
+            model += blend[comp] >= min_comp_val, f"{comp}_Min"
+    
+    # Property constraints with slack variables
+    for prop in properties_list:
+        min_val, max_val = spec_bounds.get((prop, grade_name), (0.0, float('inf')))
+        weighted_sum = lpSum([property_value.get((prop, comp), 0) * blend[comp] for comp in components])
+        
+        if min_val is not None and not math.isinf(min_val) and min_val > 0:
+            # Add slack to allow violation
+            model += weighted_sum + slack_vars[(prop, 'min')] >= min_val * total_blend, f"{grade_name}_{prop}_Min_Relaxed"
+            
+        if max_val is not None and not math.isinf(max_val):
+            # Add slack to allow violation
+            model += weighted_sum - slack_vars[(prop, 'max')] <= max_val * total_blend, f"{grade_name}_{prop}_Max_Relaxed"
+    
+    # Solve the relaxed problem
+    model.solve(PULP_CBC_CMD(msg=0))
+    
+    return model, blend, total_blend, slack_vars
+
 def analyze_grade_infeasibility(grade_name, grade_idx, grades_data, components_data, properties_list, specs_data, original_specs_data, spec_bounds):
-    """Enhanced infeasibility analysis that finds multiple feasible paths to fix constraints"""
+    """Enhanced infeasibility analysis that finds multiple feasible paths to fix constraints and shows infeasible blend"""
     diagnostics = []
     diagnostics.append(f"ENHANCED INFEASIBILITY ANALYSIS FOR {grade_name}")
     diagnostics.append("=" * 70)
@@ -269,10 +349,54 @@ def analyze_grade_infeasibility(grade_name, grade_idx, grades_data, components_d
 
         if base_model.status == LpStatusOptimal:
             diagnostics.append("ERROR: Model is actually feasible! No analysis needed.")
-            return diagnostics
+            return diagnostics, None, None
 
         diagnostics.append("1. CONFIRMED: Model is infeasible as stated")
         diagnostics.append("")
+        
+        # Get the infeasible blend using relaxed model
+        relaxed_model, relaxed_blend, relaxed_total, slack_vars = get_infeasible_blend(
+            grade_name, grade_idx, grades_data, components_data, 
+            properties_list, specs_data, spec_bounds
+        )
+        
+        infeasible_blend_data = None
+        if relaxed_model.status == LpStatusOptimal:
+            # Store the infeasible blend data
+            infeasible_blend_data = {
+                'blend': {comp: relaxed_blend[comp].varValue or 0 for comp in components},
+                'total_volume': sum(relaxed_blend[comp].varValue or 0 for comp in components),
+                'violations': {}
+            }
+            
+            # Check which constraints are violated
+            total_vol = infeasible_blend_data['total_volume']
+            if total_vol > 0:
+                for prop in properties_list:
+                    min_val, max_val = spec_bounds.get((prop, grade_name), (0.0, float('inf')))
+                    weighted_sum = sum(property_value.get((prop, comp), 0) * infeasible_blend_data['blend'][comp] for comp in components)
+                    achieved_val = weighted_sum / total_vol
+                    
+                    # Check for violations
+                    if min_val is not None and not math.isinf(min_val) and achieved_val < min_val:
+                        display_prop, display_achieved = get_display_property_info(prop, achieved_val)
+                        display_prop, display_required = get_display_property_info(prop, min_val)
+                        infeasible_blend_data['violations'][display_prop] = {
+                            'type': 'min',
+                            'required': display_required,
+                            'achieved': display_achieved,
+                            'violation': display_required - display_achieved
+                        }
+                    
+                    if max_val is not None and not math.isinf(max_val) and achieved_val > max_val:
+                        display_prop, display_achieved = get_display_property_info(prop, achieved_val)
+                        display_prop, display_required = get_display_property_info(prop, max_val)
+                        infeasible_blend_data['violations'][display_prop] = {
+                            'type': 'max',
+                            'required': display_required,
+                            'achieved': display_achieved,
+                            'violation': display_achieved - display_required
+                        }
 
         # Get all active constraints
         active_constraints = []
@@ -379,8 +503,9 @@ def analyze_grade_infeasibility(grade_name, grade_idx, grades_data, components_d
     except Exception as e:
         diagnostics.append(f"Error during infeasibility analysis: {str(e)}")
         diagnostics.append("This may indicate a deeper issue with the model setup.")
+        infeasible_blend_data = None
 
-    return diagnostics
+    return diagnostics, infeasible_blend_data, property_value
 
 # --- Core LP Optimization Logic ---
 # MODIFIED: Removed user_timezone_str from run_optimization parameters
@@ -618,10 +743,11 @@ def run_optimization(grades_data, components_data, properties_list, specs_data, 
         result1_content.write(f"Status: {grade_results[current_grade]['status']}\n")
         result1_content.write(f"Price: ${grade_selling_price:.2f}/bbl\n")
 
-        # If this grade is infeasible, show why
+        # If this grade is infeasible, show the infeasible blend
         if grade_results[current_grade]['status'] != 'Optimal':
-            result1_content.write("\nINFEASIBILITY ANALYSIS:\n")
-            diagnostics = analyze_grade_infeasibility(
+            result1_content.write("\n⚠️ INFEASIBILITY DETECTED - Showing Best Possible (Constraint-Violating) Blend\n")
+            
+            diagnostics, infeasible_blend_data, prop_values = analyze_grade_infeasibility(
                 current_grade,
                 current_grade_idx,
                 grades_data,
@@ -632,14 +758,117 @@ def run_optimization(grades_data, components_data, properties_list, specs_data, 
                 spec_bounds
             )
 
-            result1_content.write("See infeasibility_analysis.txt for detailed analysis\n\n")
-
             has_infeasible_grades = True
             for diag in diagnostics:
                 infeasibility_report_stringio.write(diag + "\n")
             infeasibility_report_stringio.write("\n" + "="*80 + "\n\n")
+            
+            # Display the infeasible blend if we got one
+            if infeasible_blend_data and infeasible_blend_data['total_volume'] > 0:
+                result1_content.write("\n=== INFEASIBLE BLEND COMPOSITION ===\n")
+                result1_content.write("(This blend violates constraints but is the best achievable)\n\n")
+                
+                # Show violations first
+                if infeasible_blend_data['violations']:
+                    result1_content.write("CONSTRAINT VIOLATIONS:\n")
+                    for prop_name, violation_info in infeasible_blend_data['violations'].items():
+                        if violation_info['type'] == 'min':
+                            result1_content.write(f"  ❌ {prop_name}: {violation_info['achieved']:.3f} < {violation_info['required']:.3f} (deficit: {violation_info['violation']:.3f})\n")
+                        else:
+                            result1_content.write(f"  ❌ {prop_name}: {violation_info['achieved']:.3f} > {violation_info['required']:.3f} (excess: {violation_info['violation']:.3f})\n")
+                    result1_content.write("\n")
+                
+                # Calculate costs and profit for the infeasible blend
+                current_total_volume = infeasible_blend_data['total_volume']
+                current_grade_total_cost = sum(component_cost[comp] * infeasible_blend_data['blend'][comp] for comp in components)
+                current_grade_revenue = grade_selling_price * current_total_volume
+                current_grade_profit = current_grade_revenue - current_grade_total_cost
+                
+                result1_content.write(f"Total Volume: {current_total_volume:.2f} bbl\n")
+                result1_content.write(f"Total Cost: ${current_grade_total_cost:.2f}\n")
+                result1_content.write(f"Total Revenue: ${current_grade_revenue:.2f}\n")
+                result1_content.write(f"Profit (if constraints ignored): ${current_grade_profit:.2f}\n\n")
+                
+                # Show the blend table
+                table_data_for_printing = [["Component Name", "Vol(bbl)", "Cost($)"] + display_properties_list]
+                for comp in components:
+                    vol = infeasible_blend_data['blend'][comp]
+                    comp_cost_val = component_cost[comp]
+                    row = [comp, f"{vol:.2f}", f"{comp_cost_val:.2f}"]
+                    for p in display_properties_list:
+                        if p == 'RON':
+                            roi_val = prop_values.get(('ROI', comp), 0)
+                            val = reverse_roi_to_ron(roi_val) if roi_val > 0 else 0
+                        elif p == 'MON':
+                            moi_val = prop_values.get(('MOI', comp), 0)
+                            val = reverse_moi_to_mon(moi_val) if moi_val > 0 else 0
+                        elif p == 'RVP':
+                            rvi_val = prop_values.get(('RVI', comp), 0)
+                            val = reverse_rvi_to_rvp(rvi_val) if rvi_val > 0 else 0
+                        else:
+                            val = prop_values.get((p, comp), 0)
+                        row.append(f"{val:.4f}" if isinstance(val, (int, float)) else str(val))
+                    table_data_for_printing.append(row)
+                
+                # Calculate quality row
+                combined_total_row_content = ["TOTAL", f"{current_total_volume:.2f}", f"{current_grade_total_cost:.2f}"] + [""] * len(display_properties_list)
+                quality_row_content = ["QUALITY", "", ""]
+                for p in display_properties_list:
+                    if p == 'RON':
+                        weighted_sum_roi = sum(prop_values.get(('ROI', comp), 0) * infeasible_blend_data['blend'][comp] for comp in components)
+                        avg_roi = weighted_sum_roi / current_total_volume if current_total_volume > 0 else 0
+                        calculated_property_value = reverse_roi_to_ron(avg_roi) if avg_roi > 0 else 0
+                    elif p == 'MON':
+                        weighted_sum_moi = sum(prop_values.get(('MOI', comp), 0) * infeasible_blend_data['blend'][comp] for comp in components)
+                        avg_moi = weighted_sum_moi / current_total_volume if current_total_volume > 0 else 0
+                        calculated_property_value = reverse_moi_to_mon(avg_moi) if avg_moi > 0 else 0
+                    elif p == 'RVP':
+                        weighted_sum_rvi = sum(prop_values.get(('RVI', comp), 0) * infeasible_blend_data['blend'][comp] for comp in components)
+                        avg_rvi = weighted_sum_rvi / current_total_volume if current_total_volume > 0 else 0
+                        calculated_property_value = reverse_rvi_to_rvp(avg_rvi) if avg_rvi > 0 else 0
+                    else:
+                        weighted_sum_for_grade = sum(prop_values.get((p, comp), 0) * infeasible_blend_data['blend'][comp] for comp in components)
+                        calculated_property_value = weighted_sum_for_grade / current_total_volume if current_total_volume > 0 else 0
+                    quality_row_content.append(f"{calculated_property_value:.4f}")
+                
+                spec_row_content = ["SPEC", "", ""]
+                for p in display_properties_list:
+                    if p in ['ROI', 'MOI', 'RVI']:
+                        min_spec_val, max_spec_val = spec_bounds.get((p, current_grade), (0, float('inf')))
+                    else:
+                        min_spec_val, max_spec_val = original_specs_data.get(p, {}).get(current_grade, {"min": 0, "max": float('inf')}).values()
+                    formatted_lb_spec = format_spec_value_concise(min_spec_val)
+                    formatted_ub_spec = format_spec_value_concise(max_spec_val)
+                    spec_string = f"{formatted_lb_spec}-{formatted_ub_spec}"
+                    spec_row_content.append(spec_string)
+                
+                all_rows_for_width_calc = [table_data_for_printing[0]] + table_data_for_printing[1:] + [combined_total_row_content, quality_row_content, spec_row_content]
+                column_widths = [max(len(str(item)) for item in col) for col in zip(*all_rows_for_width_calc)]
+                
+                def write_formatted_row(data, alignment):
+                    formatted_row = [str(data[0]).ljust(column_widths[0])] + [str(data[1]).ljust(column_widths[1])] + [str(data[2]).ljust(column_widths[2])]
+                    for i, item in enumerate(data[3:]):
+                        formatted_row.append(str(item).rjust(column_widths[i+3]))
+                    result1_content.write("| " + " | ".join(formatted_row) + " |\n")
+                
+                header_row = table_data_for_printing[0]
+                result1_content.write("| " + " | ".join(header_row[i].ljust(column_widths[i]) for i in range(len(header_row))) + " |\n")
+                separator_parts = [("-" * width) for width in column_widths]
+                result1_content.write("|-" + "-|-".join(separator_parts) + "-|\n")
+                for row_content in table_data_for_printing[1:]:
+                    write_formatted_row(row_content, 'right')
+                write_formatted_row(combined_total_row_content, 'right')
+                write_formatted_row(quality_row_content, 'right')
+                write_formatted_row(spec_row_content, 'right')
+                
+                result1_content.write("\nSee infeasibility_analysis.txt for detailed constraint analysis\n")
+            else:
+                result1_content.write("\nUnable to generate even an infeasible blend. Problem is severely constrained.\n")
+                result1_content.write("See infeasibility_analysis.txt for detailed analysis\n\n")
+            
             continue
 
+        # For feasible grades, show the optimal blend (existing code)
         result1_content.write(f"\n=== Calculated Properties of '{current_grade}' Optimized Blend ===\n")
 
         if model.status == LpStatusOptimal:
@@ -1049,7 +1278,7 @@ def run_lp():
         component_display_names = {
             "C4B": "Alkyl Butane", "IS1": "Isomerate", "RFL": "Reformate",
             "F5X": "Mixed RFC", "RCG": "FCC Gasoline", "IC4": "DIB IC4",
-            "HBY": "SHIP C4", "AKK": "Alkylate", "ETH": "Ethanol"
+            "HBY": "SHIP C4", "AKK": "Alkylate", "ETH": "Ethanol", "LTN": "Light Naptha"
         }
         all_properties = ["SPG", "SUL", "RON", "MON", "RVP", "E70", "E10", "E15", "ARO", "BEN", "OXY", "OLEFIN"]
 
