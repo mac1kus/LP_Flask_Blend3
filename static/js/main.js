@@ -7,8 +7,11 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function updateDateTime() {
         const now = new Date();
-        document.getElementById('currentDate').textContent = now.toLocaleDateString('en-CA');
-        document.getElementById('currentTime').textContent = now.toLocaleTimeString('en-GB');
+        const dateElement = document.getElementById('currentDate');
+        const timeElement = document.getElementById('currentTime');
+        
+        if (dateElement) dateElement.textContent = now.toLocaleDateString('en-CA');
+        if (timeElement) timeElement.textContent = now.toLocaleTimeString('en-GB');
     }
 
     /**
@@ -18,30 +21,24 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function showMessage(message, type = 'info') {
         const msgBox = document.getElementById('messageBox');
-        if (!msgBox) {
-            console.error('Message box element not found!');
-            return;
-        }
+        if (!msgBox) return;
 
         msgBox.textContent = message;
         msgBox.className = 'show';
 
-        if (type === 'error') {
-            msgBox.style.backgroundColor = '#dc2626';
-        } else if (type === 'success') {
-            msgBox.style.backgroundColor = '#16a34a';
-        } else {
-            msgBox.style.backgroundColor = '#2563eb';
-        }
+        const colors = {
+            error: '#dc2626',
+            success: '#16a34a',
+            info: '#2563eb'
+        };
+        msgBox.style.backgroundColor = colors[type] || colors.info;
 
-        // Automatically hide the message after 1.5 seconds
         setTimeout(() => {
             msgBox.className = '';
         }, 1500); 
     }
 
     window.showMessage = showMessage;
-
 
     // --- RESIZABLE INPUT FUNCTIONALITY ---
     let isResizing = false;
@@ -54,6 +51,8 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {HTMLElement} input - The input element to make resizable.
      */
     function makeInputResizable(input) {
+        if (input.closest('.resizable-input-container')) return; // Already resizable
+
         const container = document.createElement('div');
         container.className = 'resizable-input-container';
 
@@ -101,77 +100,60 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-
     // --- MUSIC PLAYER FUNCTIONALITY ---
-    // --- MUSIC PLAYER FUNCTIONALITY ---
-const playButton = document.getElementById('playMusicButton');
-const music = document.getElementById('africanMusic');
-const musicTracks = [
-    'static/music/African Journey.mp3',
-    'static/music/Batacumbele.mp3',
-    'static/music/Drums.Chant.mp3',
-    'static/music/Flute.Drums.mp3'
-];
+    const playButton = document.getElementById('playMusicButton');
+    const music = document.getElementById('africanMusic');
+    const musicTracks = [
+        'static/music/African Journey.mp3',
+        'static/music/Batacumbele.mp3',
+        'static/music/Drums.Chant.mp3',
+        'static/music/Flute.Drums.mp3'
+    ];
 
-/**
- * Plays a random track from the musicTracks array.
- */
-function playRandomMusic() {
-    const randomIndex = Math.floor(Math.random() * musicTracks.length);
-    const selectedTrack = musicTracks[randomIndex];
-    music.src = selectedTrack;
-    
-    // Attempt to play the music and handle the promise it returns
-    const playPromise = music.play();
-    if (playPromise !== undefined) {
-        playPromise.then(() => {
-            // Playback started successfully, so update the button text.
-            playButton.textContent = 'Pause African Music ⏸️';
-        }).catch(error => {
-            // Playback was prevented by the browser.
-            console.error('Playback was blocked by the browser:', error);
-            // Revert button text and show a message to the user.
-            playButton.textContent = 'Play African Music 🎵';
-            showMessage('Playback was blocked. Click again to try.', 'error');
-        });
-    }
-}
-if (playButton && music) {
-    playButton.addEventListener('click', () => {
-        if (music.paused) {
-            playRandomMusic();
-        } else {
-            music.pause();
-            playButton.textContent = 'Play African Music 🎵';
+    function playRandomMusic() {
+        const randomIndex = Math.floor(Math.random() * musicTracks.length);
+        music.src = musicTracks[randomIndex];
+        
+        const playPromise = music.play();
+        if (playPromise !== undefined) {
+            playPromise.then(() => {
+                playButton.textContent = 'Pause African Music ⏸️';
+            }).catch(error => {
+                console.error('Playback was blocked by the browser:', error);
+                playButton.textContent = 'Play African Music 🎵';
+                showMessage('Playback was blocked. Click again to try.', 'error');
+            });
         }
-    });
+    }
 
-    music.addEventListener('ended', () => {
-        playRandomMusic();
-    });
-}
+    if (playButton && music) {
+        playButton.addEventListener('click', () => {
+            if (music.paused) {
+                playRandomMusic();
+            } else {
+                music.pause();
+                playButton.textContent = 'Play African Music 🎵';
+            }
+        });
+
+        music.addEventListener('ended', playRandomMusic);
+    }
+
     // --- FORM DATA PERSISTENCE ---
     const storageKey = 'componentFormData';
     const form = document.querySelector('form[action="/run_lp"]');
 
-    /**
-     * Loads saved form data from localStorage.
-     */
     function loadSavedData() {
-        if (!form) {
-            console.error("Form not found.");
-            return;
-        }
+        if (!form) return;
+        
         try {
             const savedData = localStorage.getItem(storageKey);
             if (savedData) {
                 const data = JSON.parse(savedData);
-                for (const inputName in data) {
+                Object.keys(data).forEach(inputName => {
                     const input = form.querySelector(`[name="${inputName}"]`);
-                    if (input) {
-                        input.value = data[inputName];
-                    }
-                }
+                    if (input) input.value = data[inputName];
+                });
                 showMessage('Previous data restored successfully!', 'success');
             }
         } catch (e) {
@@ -180,18 +162,15 @@ if (playButton && music) {
         }
     }
 
-    /**
-     * Saves the current form data to localStorage.
-     */
     function saveData() {
-        if (!form) {
-            return;
-        }
+        if (!form) return;
+        
         const formData = new FormData(form);
         const dataObject = {};
         formData.forEach((value, key) => {
             dataObject[key] = value;
         });
+        
         try {
             localStorage.setItem(storageKey, JSON.stringify(dataObject));
         } catch (e) {
@@ -199,33 +178,21 @@ if (playButton && music) {
         }
     }
 
-
     // --- RESTORE LAST VALUE FUNCTIONALITY ---
-    /**
-     * Attaches event listeners to an input element to restore its last known value
-     * if the user clears the field. This function is corrected to handle backspace issue.
-     * @param {HTMLElement} inputElement - The input element to monitor.
-     */
     function restoreLastValue(inputElement) {
-        let lastValue = inputElement.value; // Store the initial value.
+        let lastValue = inputElement.value;
 
-        // Listen for the 'blur' event, which is the most reliable time to check.
         inputElement.addEventListener('blur', () => {
             const currentValue = inputElement.value.trim();
             if (currentValue === '') {
                 inputElement.value = lastValue;
-                console.log(`Input restored to last value: ${lastValue}`);
             } else {
                 lastValue = currentValue;
             }
         });
     }
 
-
     // --- DYNAMIC ROW CREATION ---
-    /**
-     * Adds a new component row dynamically to the component table.
-     */
     function addComponentRow() {
         const componentsTbody = document.getElementById('components-tbody');
         if (!componentsTbody) {
@@ -235,14 +202,14 @@ if (playButton && music) {
 
         const componentsTheadRow = document.querySelector('#components-table thead tr:last-child');
         const propertyHeaders = [];
+        
         if (componentsTheadRow) {
-            // Dynamically find the index of the "Cost" header
-            let costHeaderIndex = Array.from(componentsTheadRow.cells).findIndex(th => th.textContent.trim() === 'Cost');
+            const costHeaderIndex = Array.from(componentsTheadRow.cells).findIndex(th => th.textContent.trim() === 'Cost');
             if (costHeaderIndex === -1) {
                 console.error("Could not find 'Cost' header to determine property start index.");
                 return;
             }
-            // Start iterating from the cell after "Cost"
+            
             for (let i = costHeaderIndex + 1; i < componentsTheadRow.cells.length; i++) {
                 propertyHeaders.push(componentsTheadRow.cells[i].textContent.trim());
             }
@@ -254,31 +221,30 @@ if (playButton && music) {
 
         const newRow = document.createElement('tr');
 
-        // TAG input field (This column is always visible)
-        let cell = document.createElement('td');
-        cell.classList.add('text-left');
-        let tagInput = document.createElement('input');
-        tagInput.type = 'text';
-        tagInput.name = `component_${newComponentTag}_name`;
-        tagInput.value = newComponentTag;
-        tagInput.classList.add('text-left');
+        // Helper function to create input cell
+        function createInputCell(name, value, className = 'text-left') {
+            const cell = document.createElement('td');
+            cell.classList.add('text-left');
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.name = name;
+            input.value = value;
+            input.className = className;
+            cell.appendChild(input);
+            return { cell, input };
+        }
+
+        // TAG input field
+        const { cell: tagCell, input: tagInput } = createInputCell(`component_${newComponentTag}_name`, newComponentTag);
         tagInput.addEventListener('blur', saveData);
-        cell.appendChild(tagInput);
-        newRow.appendChild(cell);
+        newRow.appendChild(tagCell);
 
         // Component Name input field
-        cell = document.createElement('td');
-        cell.classList.add('text-left');
-        let nameInput = document.createElement('input');
-        nameInput.type = 'text';
-        nameInput.name = `component_${newComponentTag}_tag`;
-        nameInput.value = newComponentName;
-        nameInput.classList.add('text-left');
+        const { cell: nameCell, input: nameInput } = createInputCell(`component_${newComponentTag}_tag`, newComponentName);
         nameInput.addEventListener('blur', saveData);
-        cell.appendChild(nameInput);
-        newRow.appendChild(cell);
+        newRow.appendChild(nameCell);
 
-        // Inputs for Min Comp, Availability, Factor, Cost
+        // Standard input fields
         const inputFields = [
             { name: `component_${newComponentTag}_min_comp`, value: '0' },
             { name: `component_${newComponentTag}_availability`, value: '0' },
@@ -287,38 +253,24 @@ if (playButton && music) {
         ];
 
         inputFields.forEach(field => {
-            cell = document.createElement('td');
-            cell.classList.add('text-left');
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.name = field.name;
-            input.value = field.value;
-            input.className = 'resizable-component-input numeric-input text-left';
-            cell.appendChild(input);
+            const { cell, input } = createInputCell(field.name, field.value, 'resizable-component-input numeric-input text-left');
             newRow.appendChild(cell);
             makeInputResizable(input);
             restoreLastValue(input);
         });
 
-        // Inputs for properties
+        // Property inputs
         propertyHeaders.forEach(prop => {
-            cell = document.createElement('td');
-            cell.classList.add('text-left');
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.name = `component_${newComponentTag}_property_${prop}`;
-            
-            // Set initial values based on the rules provided
+            let value;
             if (['SUL', 'ARO', 'BEN', 'OXY', 'OLEFIN'].includes(prop)) {
-                input.value = '';
+                value = '';
             } else if (['RON', 'MON'].includes(prop)) {
-                input.value = 'inf';
+                value = 'inf';
             } else {
-                input.value = '0';
+                value = '0';
             }
             
-            input.className = 'resizable-component-input numeric-input text-left';
-            cell.appendChild(input);
+            const { cell, input } = createInputCell(`component_${newComponentTag}_property_${prop}`, value, 'resizable-component-input numeric-input text-left');
             newRow.appendChild(cell);
             makeInputResizable(input);
             restoreLastValue(input);
@@ -326,29 +278,21 @@ if (playButton && music) {
 
         componentsTbody.appendChild(newRow);
         showMessage(`New component '${newComponentTag}' added!`, 'success');
-        
-        // --- REMOVED: expandable column logic for new rows
     }
 
-    /**
-     * Fetches the Brent crude oil price from the server and updates the UI.
-     */
+    // --- BRENT PRICE FUNCTIONALITY ---
     async function fetchPrice() {
         const priceElement = document.getElementById("price");
+        if (!priceElement) return;
 
         try {
             const response = await fetch("/get_brent_price");
             const data = await response.json();
-            if (data.price) {
-                priceElement.textContent = `$${data.price}`;
-            } else {
-                priceElement.textContent = "Error loading price";
-            }
+            priceElement.textContent = data.price ? `$${data.price}` : "Error loading price";
         } catch (error) {
             priceElement.textContent = "Error fetching data";
         }
     }
-
 
     // --- CHART FUNCTIONALITY ---
     async function fetchBrentChartData() {
@@ -357,8 +301,6 @@ if (playButton && music) {
             const data = await response.json();
             if (data.labels && data.values) {
                 drawBrentChart(data.labels, data.values);
-            } else {
-                console.error('Server error: No chart data received.');
             }
         } catch (error) {
             console.error('Network error:', error);
@@ -366,7 +308,10 @@ if (playButton && music) {
     }
 
     function drawBrentChart(labels, values) {
-        const ctx = document.getElementById('brent-chart').getContext('2d');
+        const canvas = document.getElementById('brent-chart');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
         new Chart(ctx, {
             type: 'line',
             data: {
@@ -384,69 +329,48 @@ if (playButton && music) {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: {
-                        display: false 
-                    }
+                    legend: { display: false }
                 },
                 scales: {
                     y: {
                         beginAtZero: false,
-                        grid: {
-                            color: 'rgba(255, 255, 255, 0.2)'
-                        },
-                        ticks: {
-                            color: 'white'
-                        }
+                        grid: { color: 'rgba(255, 255, 255, 0.2)' },
+                        ticks: { color: 'white' }
                     },
-                    x: {
-                        display: false
-                    }
+                    x: { display: false }
                 }
             }
         });
     }
 
-
     // --- INITIALIZATION ---
     updateDateTime();
     setInterval(updateDateTime, 1000);
 
-    // Initial fetch for Brent price and then auto-refresh
     fetchPrice();
-    setInterval(fetchPrice, 60000); 
-
-    // Call the function to draw the chart on page load
+    setInterval(fetchPrice, 60000);
     fetchBrentChartData();
 
-    // Add listener to prevent form submission on 'Enter' key press
+    // Form setup
     if (form) {
         form.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-            }
+            if (event.key === 'Enter') event.preventDefault();
         });
+        form.addEventListener('input', saveData);
+        form.addEventListener('submit', saveData);
     }
 
-    // Make inputs resizable and restore last value
-    document.querySelectorAll('.resizable-component-input').forEach(input => {
-        makeInputResizable(input);
-    });
-    document.querySelectorAll('.numeric-input').forEach(input => {
-        restoreLastValue(input);
-    });
+    // Make existing inputs resizable and add restore functionality
+    document.querySelectorAll('.resizable-component-input').forEach(makeInputResizable);
+    document.querySelectorAll('.numeric-input').forEach(restoreLastValue);
 
-    // Add event listener for the new component button
+    // Add component button
     const addComponentButton = document.getElementById('addComponentButton');
     if (addComponentButton) {
         addComponentButton.addEventListener('click', addComponentRow);
     }
 
-    // Handle form data persistence
-    if (form) {
-        form.addEventListener('input', saveData);
-        form.addEventListener('submit', saveData);
-    }
-    
+    // Load saved data and set timezone
     loadSavedData();
     
     const userTimezoneInput = document.getElementById('user_timezone_input');
@@ -454,61 +378,57 @@ if (playButton && music) {
         userTimezoneInput.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
     }
 
-    console.log('Application initialized successfully!');
-    showMessage('Application loaded successfully!', 'success');
-    
-    // Update spec table inputs based on the new rules
+    // Apply field rules for spec table
+    const fieldRules = {
+        'SUL': { minEmpty: true },
+        'ARO': { minEmpty: true },
+        'BEN': { minEmpty: true },
+        'OXY': { minEmpty: true },
+        'OLEFIN': { minEmpty: true },
+        'RVP': { minValue: '0' },
+        'RON': { maxValue: 'inf', maxReadonly: true },
+        'MON': { maxValue: 'inf', maxReadonly: true }
+    };
+
     document.querySelectorAll('#specs-tbody tr').forEach(row => {
-        const propertyName = row.cells[0].textContent.trim();
+        const propertyName = row.cells[0]?.textContent.trim();
+        const rule = fieldRules[propertyName];
         
-        // Find all min and max input fields for this property
-        const minInputs = row.querySelectorAll('input[name$="_min"]');
-        const maxInputs = row.querySelectorAll('input[name$="_max"]');
-        
-        // Apply rules
-        switch (propertyName) {
-            case 'SUL':
-            case 'ARO':
-            case 'BEN':
-            case 'OXY':
-            case 'OLEFIN':
-                minInputs.forEach(input => {
+        if (rule) {
+            if (rule.minEmpty) {
+                row.querySelectorAll('input[name$="_min"]').forEach(input => {
                     input.value = '';
                     input.readOnly = true;
                     input.classList.add('bg-gray-200', 'cursor-not-allowed');
                 });
-                break;
-            case 'RVP':
-                minInputs.forEach(input => {
-                    input.value = '0';
+            }
+            if (rule.minValue) {
+                row.querySelectorAll('input[name$="_min"]').forEach(input => {
+                    input.value = rule.minValue;
                 });
-                break;
-            case 'RON':
-            case 'MON':
-                maxInputs.forEach(input => {
-                    input.value = 'inf';
+            }
+            if (rule.maxValue && rule.maxReadonly) {
+                row.querySelectorAll('input[name$="_max"]').forEach(input => {
+                    input.value = rule.maxValue;
                     input.readOnly = true;
                     input.classList.add('bg-gray-200', 'cursor-not-allowed');
                 });
-                break;
-            default:
-                // For other properties, let the existing behavior be.
-                break;
+            }
         }
     });
 
-    // Make a specific set of fields empty and locked on load (existing logic)
+    // Handle special field classes
     document.querySelectorAll('.empty-field').forEach(input => {
         input.value = '';
         input.readOnly = true;
         input.classList.add('bg-gray-200', 'cursor-not-allowed');
     });
 
-    // Make specific fields inf and locked (existing logic)
     document.querySelectorAll('.readonly-field').forEach(input => {
         input.readOnly = true;
         input.classList.add('bg-gray-200', 'cursor-not-allowed');
     });
 
+    console.log('Application initialized successfully!');
+    showMessage('Application loaded successfully!', 'success');
 });
-
